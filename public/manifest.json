@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Lululemon Fit Signal",
+  "version": "0.1.0",
+  "description": "Analyze lululemon product pages and provide standalone fit and styling advice from body specs.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://shop.lululemon.com/*",
+    "https://www.lululemon.com/*"
+  ],
+  "action": {
+    "default_title": "Lululemon Fit Signal",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://shop.lululemon.com/*",
+        "https://www.lululemon.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

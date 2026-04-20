@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lululemon Fit Signal</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Avenir Next", "Trebuchet MS", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        width: 320px;
+        background:
+          radial-gradient(circle at top left, rgba(132, 169, 140, 0.28), transparent 42%),
+          linear-gradient(180deg, #f7f3eb 0%, #fffdf8 100%);
+        color: #173126;
+      }
+
+      .shell {
+        padding: 18px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .card {
+        background: rgba(255, 252, 247, 0.92);
+        border: 1px solid rgba(23, 49, 38, 0.08);
+        border-radius: 22px;
+        padding: 16px;
+        box-shadow: 0 14px 36px rgba(23, 49, 38, 0.08);
+        display: grid;
+        gap: 10px;
+      }
+
+      .eyebrow {
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: #5a7065;
+        font-weight: 700;
+      }
+
+      .title {
+        font-size: 20px;
+        line-height: 1.1;
+        font-weight: 700;
+      }
+
+      .text {
+        font-size: 13px;
+        line-height: 1.5;
+        color: #476056;
+      }
+
+      .actions {
+        display: grid;
+        gap: 10px;
+      }
+
+      .action {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        border-radius: 999px;
+        text-decoration: none;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .action.primary {
+        background: #173c2d;
+        color: #fffdf9;
+      }
+
+      .action.secondary {
+        background: #edf1eb;
+        color: #214635;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="card">
+        <div class="eyebrow">Launcher</div>
+        <div class="title">Open the fit engine from anywhere.</div>
+        <div class="text">
+          Use the standalone entry for general styling advice from photos and body specs, or open saved profile
+          settings.
+        </div>
+        <div class="actions">
+          <a class="action primary" href="./standalone.html" target="_blank" rel="noreferrer">Open Standalone Fit Advice</a>
+          <a class="action secondary" href="./options.html" target="_blank" rel="noreferrer">Open Profile Settings</a>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
