@@ -4,7 +4,11 @@ import { recommendStyleProfile } from "../engine/recommendation"
 import { DEFAULT_PROFILE } from "../shared/defaultProfile"
 import type { AttributeFamily, StyleAdviceResult, UserInputProfile } from "../shared/types"
 import { getUserProfile, saveUserProfile } from "../storage/localStore"
+import { analyzeProfilePhotos, optimizeUploadedImage } from "../vision/bodyImageAnalysis"
 import { standaloneStyles } from "./styles"
+
+const SUPPORTED_IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"]
+const SUPPORTED_IMAGE_ACCEPT = ".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
 
 function parseList(value: string): string[] {
   return value
@@ -50,77 +54,154 @@ function safeRuntimeUrl(path: string): string {
   return typeof chrome !== "undefined" && chrome.runtime?.getURL ? chrome.runtime.getURL(path) : path
 }
 
+function isSupportedUploadType(file: File): boolean {
+  return SUPPORTED_IMAGE_MIME_TYPES.includes(file.type.toLowerCase())
+}
+
+function appendUnique(values: string[] | undefined, additions: string[]): string[] {
+  return Array.from(new Set([...(values ?? []), ...additions]))
+}
+
+function hasRequiredProfileInputs(profile: UserInputProfile, frontImages: string[], backImages: string[]): boolean {
+  return frontImages.length > 0 && backImages.length > 0 && profile.height !== undefined && profile.weight !== undefined
+}
+
 function App() {
   const [profile, setProfile] = useState<UserInputProfile>(DEFAULT_PROFILE)
   const [status, setStatus] = useState("Advice updates as you edit the profile below.")
-  const [frontUploadUrl, setFrontUploadUrl] = useState<string>()
-  const [sideUploadUrl, setSideUploadUrl] = useState<string>()
+  const [analysisPreview, setAnalysisPreview] = useState<UserInputProfile["imageAnalysis"]>()
+  const [analysisStatus, setAnalysisStatus] = useState("")
+  const frontImages = profile.frontImageUrls ?? (profile.frontImageUrl ? [profile.frontImageUrl] : [])
+  const backImages = profile.backImageUrls ?? (profile.backImageUrl ?? profile.sideImageUrl ? [profile.backImageUrl ?? profile.sideImageUrl!] : [])
+  const backImageUrl = backImages[0]
 
   useEffect(() => {
     void getUserProfile().then((savedProfile) => {
       setProfile(savedProfile)
+      setAnalysisPreview(savedProfile.imageAnalysis)
       setStatus("Loaded your saved profile. Adjust anything here to explore standalone advice.")
     })
   }, [])
 
   useEffect(() => {
-    return () => {
-      if (frontUploadUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(frontUploadUrl)
-      }
-      if (sideUploadUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(sideUploadUrl)
+    let cancelled = false
+
+    if (frontImages.length === 0 && backImages.length === 0) {
+      setAnalysisPreview(profile.imageAnalysis)
+      setAnalysisStatus("")
+      return () => {
+        cancelled = true
       }
     }
-  }, [frontUploadUrl, sideUploadUrl])
+
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        const { analysis, warnings } = await analyzeProfilePhotos(profile)
+        if (cancelled) {
+          return
+        }
+
+        setAnalysisPreview(analysis)
+        setAnalysisStatus(
+          analysis
+            ? `Live photo analysis ready${warnings.length ? `. ${warnings.join(" ")}` : "."}`
+            : warnings.join(" ")
+        )
+      })()
+    }, 320)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [profile.frontImageUrl, profile.frontImageUrls, profile.backImageUrl, profile.backImageUrls, profile.sideImageUrl, profile.height, frontImages.length, backImages.length, backImageUrl, profile.imageAnalysis])
 
   function updateField<Key extends keyof UserInputProfile>(key: Key, value: UserInputProfile[Key]) {
-    setProfile((current) => ({ ...current, [key]: value }))
+    setProfile((current) => ({
+      ...current,
+      [key]: value,
+      imageAnalysis:
+        key === "frontImageUrl" || key === "backImageUrl" || key === "sideImageUrl" || key === "height"
+          ? undefined
+          : current.imageAnalysis
+    }))
   }
 
-  function handlePhotoUpload(side: "front" | "side", file?: File) {
-    const nextUrl = file ? URL.createObjectURL(file) : undefined
-
-    if (side === "front") {
-      setFrontUploadUrl((current) => {
-        if (current?.startsWith("blob:")) {
-          URL.revokeObjectURL(current)
-        }
-        return nextUrl
-      })
-    } else {
-      setSideUploadUrl((current) => {
-        if (current?.startsWith("blob:")) {
-          URL.revokeObjectURL(current)
-        }
-        return nextUrl
-      })
+  async function handlePhotoUpload(side: "front" | "back", files?: FileList | File[]) {
+    const uploadFiles = Array.from(files ?? [])
+    if (uploadFiles.length === 0) {
+      return
     }
+
+    if (uploadFiles.some((file) => !isSupportedUploadType(file))) {
+      setAnalysisStatus("Unsupported image type. Upload a JPG, PNG, or WebP file.")
+      return
+    }
+
+    setAnalysisStatus(`Optimizing ${uploadFiles.length} ${side} photo${uploadFiles.length > 1 ? "s" : ""}...`)
+    const nextUrls = await Promise.all(uploadFiles.map((file) => optimizeUploadedImage(file)))
+
+    setProfile((current) => ({
+      ...current,
+      ...(side === "front"
+        ? {
+            frontImageUrls: appendUnique(current.frontImageUrls, nextUrls),
+            frontImageUrl: appendUnique(current.frontImageUrls, nextUrls)[0]
+          }
+        : {
+            backImageUrls: appendUnique(current.backImageUrls, nextUrls),
+            backImageUrl: appendUnique(current.backImageUrls, nextUrls)[0],
+            sideImageUrl: appendUnique(current.backImageUrls, nextUrls)[0]
+          }),
+      imageAnalysis: undefined
+    }))
   }
 
   async function handleSave() {
-    await saveUserProfile(profile)
-    setStatus("Saved the current measurements, URLs, preferences, and goals as your default profile.")
+    const nextProfile: UserInputProfile = {
+      ...profile,
+      frontImageUrls: frontImages,
+      backImageUrl,
+      backImageUrls: backImages,
+      sideImageUrl: backImageUrl,
+      imageAnalysis: analysisPreview
+    }
+
+    await saveUserProfile(nextProfile)
+    setProfile(nextProfile)
+    setStatus(
+      hasRequiredProfileInputs(nextProfile, frontImages, backImages)
+        ? "Profile saved successfully. Your general styling suggestions are already visible on this page. You can now go back to a supported product page to see product-specific recommendation results."
+        : "Saved the current measurements, uploaded photos, preferences, and live photo analysis as your default profile."
+    )
   }
 
   async function handleReload() {
     const savedProfile = await getUserProfile()
     setProfile(savedProfile)
+    setAnalysisPreview(savedProfile.imageAnalysis)
     setStatus("Reloaded the saved profile into the standalone advice view.")
   }
 
   function handleResetDraft() {
     setProfile(DEFAULT_PROFILE)
+    setAnalysisPreview(undefined)
+    setAnalysisStatus("")
     setStatus("Reset the draft to a blank local profile. Advice is now based on minimal inputs.")
   }
 
   const runtimeProfile: UserInputProfile = {
-    ...profile,
-    frontImageUrl: frontUploadUrl ?? profile.frontImageUrl,
-    sideImageUrl: sideUploadUrl ?? profile.sideImageUrl
-  }
+      ...profile,
+      frontImageUrls: frontImages,
+      backImageUrl,
+      backImageUrls: backImages,
+      sideImageUrl: backImageUrl,
+      imageAnalysis: analysisPreview
+    }
 
   const advice = recommendStyleProfile(runtimeProfile)
+  const hasCompletedRequiredInputs = hasRequiredProfileInputs(runtimeProfile, frontImages, backImages)
+  const hasVisibleGeneralAdvice = advice.recommendedAttributes.length > 0 || advice.conditionalAttributes.length > 0
   const familyOrder: AttributeFamily[] = ["length", "neckline", "waistline", "silhouette", "strapSleeve", "fabric"]
   const optionsUrl = safeRuntimeUrl("options.html")
 
@@ -130,13 +211,19 @@ function App() {
         <div className="sf-eyebrow">Standalone Fit Advice</div>
         <h1 className="sf-title">General styling guidance without any shopping page.</h1>
         <div className="sf-lede">
-          Give the engine your front and side photos, basic body specs, and preference goals. It will return
+          Give the engine your front and back photos, basic body specs, and preference goals. It will return
           general attribute advice such as which lengths, necklines, waist treatments, and silhouettes are more
-          likely to support your proportions.
+          likely to support your proportions. Uploaded photos are actually analyzed into silhouette ratios and
+          estimated body measurements during this session.
         </div>
         <div className="sf-inline-links">
           <a href={optionsUrl}>Open Saved Profile Settings</a>
         </div>
+        {hasCompletedRequiredInputs ? (
+          <div className="sf-note">
+            Submission looks complete. Your general styling suggestions should already be visible on this page. After reviewing them, you can go back to a supported product page and see product-specific recommendation results using this saved profile.
+          </div>
+        ) : null}
       </div>
 
       <div className="sf-shell">
@@ -151,56 +238,79 @@ function App() {
               <div className="sf-section-label">Photos</div>
               <div className="sf-preview-grid">
                 <div className="sf-preview">
-                  {frontUploadUrl || profile.frontImageUrl ? (
-                    <img alt="Front profile preview" src={frontUploadUrl ?? profile.frontImageUrl} />
+                  {frontImages.length > 0 ? (
+                    <img alt="Front profile preview" src={frontImages[0]} />
                   ) : (
-                    <div>Front photo preview. Upload a fitted full-body image or paste a URL below.</div>
+                    <div>Front photo preview. Upload a fitted full-body image or paste a direct image URL below.</div>
                   )}
                 </div>
                 <div className="sf-preview">
-                  {sideUploadUrl || profile.sideImageUrl ? (
-                    <img alt="Side profile preview" src={sideUploadUrl ?? profile.sideImageUrl} />
+                  {backImages.length > 0 ? (
+                    <img alt="Back profile preview" src={backImages[0]} />
                   ) : (
-                    <div>Side photo preview. Neutral stance and minimal occlusion work best.</div>
+                    <div>Back photo preview. Neutral stance and minimal occlusion work best.</div>
                   )}
                 </div>
               </div>
+              {frontImages.length + backImages.length > 2 ? (
+                <div className="sf-note">
+                  {frontImages.length} front and {backImages.length} back photos loaded. The live analyzer will average all usable photos.
+                </div>
+              ) : null}
               <div className="sf-field-grid wide">
                 <label>
                   Front Photo Upload
                   <input
                     className="sf-file-input"
                     type="file"
-                    accept="image/*"
-                    onChange={(event) => handlePhotoUpload("front", event.target.files?.[0])}
+                    multiple
+                    accept={SUPPORTED_IMAGE_ACCEPT}
+                    onChange={(event) => void handlePhotoUpload("front", event.target.files ?? undefined)}
                   />
                 </label>
                 <label>
-                  Side Photo Upload
+                  Back Photo Upload
                   <input
                     className="sf-file-input"
                     type="file"
-                    accept="image/*"
-                    onChange={(event) => handlePhotoUpload("side", event.target.files?.[0])}
+                    multiple
+                    accept={SUPPORTED_IMAGE_ACCEPT}
+                    onChange={(event) => void handlePhotoUpload("back", event.target.files ?? undefined)}
                   />
                 </label>
               </div>
               <div className="sf-field-grid">
                 <label>
-                  Front Photo URL
+                  Front Photo Direct URL
                   <input
                     value={profile.frontImageUrl ?? ""}
-                    onChange={(event) => updateField("frontImageUrl", event.target.value || undefined)}
+                    onChange={(event) =>
+                      setProfile((current) => ({
+                        ...current,
+                        frontImageUrl: event.target.value || undefined,
+                        frontImageUrls: event.target.value ? [event.target.value] : [],
+                        imageAnalysis: undefined
+                      }))
+                    }
                   />
                 </label>
                 <label>
-                  Side Photo URL
+                  Back Photo Direct URL
                   <input
-                    value={profile.sideImageUrl ?? ""}
-                    onChange={(event) => updateField("sideImageUrl", event.target.value || undefined)}
+                    value={backImageUrl ?? ""}
+                    onChange={(event) =>
+                      setProfile((current) => ({
+                        ...current,
+                        backImageUrls: event.target.value ? [event.target.value] : [],
+                        backImageUrl: event.target.value || undefined,
+                        sideImageUrl: event.target.value || undefined,
+                        imageAnalysis: undefined
+                      }))
+                    }
                   />
                 </label>
               </div>
+              {analysisStatus ? <div className="sf-note">{analysisStatus}</div> : null}
             </div>
 
             <div className="sf-section">
@@ -365,13 +475,25 @@ function App() {
           </div>
         </div>
 
-        <AdvicePanel advice={advice} />
+        <AdvicePanel
+          advice={advice}
+          hasCompletedRequiredInputs={hasCompletedRequiredInputs}
+          hasVisibleGeneralAdvice={hasVisibleGeneralAdvice}
+        />
       </div>
     </div>
   )
 }
 
-function AdvicePanel({ advice }: { advice: StyleAdviceResult }) {
+function AdvicePanel({
+  advice,
+  hasCompletedRequiredInputs,
+  hasVisibleGeneralAdvice
+}: {
+  advice: StyleAdviceResult
+  hasCompletedRequiredInputs: boolean
+  hasVisibleGeneralAdvice: boolean
+}) {
   const familyOrder: AttributeFamily[] = ["length", "neckline", "waistline", "silhouette", "strapSleeve", "fabric"]
 
   return (
@@ -383,6 +505,14 @@ function AdvicePanel({ advice }: { advice: StyleAdviceResult }) {
         </div>
 
         <div className="sf-panel-body">
+          {hasCompletedRequiredInputs ? (
+            <div className="sf-note">
+              {hasVisibleGeneralAdvice
+                ? "Submission successful. Review the general advice below now, then return to a supported product page whenever you want item-level recommendations."
+                : "Submission successful. The page has enough profile data; if stronger advice still does not appear, add optional measurements or preference goals to sharpen the guidance."}
+            </div>
+          ) : null}
+
           <div className="sf-pill-row">
             <span className="sf-pill">Confidence {Math.round(advice.confidence * 100)}%</span>
             {advice.attributeGroups.length.recommended.length ? (

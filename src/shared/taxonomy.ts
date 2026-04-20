@@ -54,6 +54,23 @@ export function classifyApparelCategory(...pieces: Array<string | undefined>): A
     .join(" ")
     .toLowerCase()
 
+  const countMatches = (keyword: string): number => {
+    let count = 0
+    let startIndex = 0
+
+    while (startIndex < text.length) {
+      const matchIndex = text.indexOf(keyword, startIndex)
+      if (matchIndex === -1) {
+        break
+      }
+
+      count += 1
+      startIndex = matchIndex + keyword.length
+    }
+
+    return count
+  }
+
   let winningCategory: ApparelCategory = "unknown"
   let winningScore = 0
 
@@ -61,10 +78,11 @@ export function classifyApparelCategory(...pieces: Array<string | undefined>): A
     [ApparelCategory, string[]]
   >) {
     const score = keywords.reduce((sum, keyword) => {
-      if (!text.includes(keyword)) {
+      const matches = countMatches(keyword)
+      if (matches === 0) {
         return sum
       }
-      return sum + keyword.length
+      return sum + keyword.length * matches
     }, 0)
     if (score > winningScore) {
       winningScore = score

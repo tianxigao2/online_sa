@@ -1,6 +1,7 @@
 import type { UserInputProfile } from "./types"
 
 export const DEFAULT_PROFILE: UserInputProfile = {
+  unitSystem: "metric",
   styleGoals: [],
   explicitPreferences: {
     likedFits: [],

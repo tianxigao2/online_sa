@@ -39,6 +39,18 @@ await Promise.all([
     }
   }),
   build({
+    entryPoints: [path.join(rootDir, "src/background/index.ts")],
+    outfile: path.join(distDir, "background.js"),
+    bundle: true,
+    format: "iife",
+    platform: "browser",
+    sourcemap: true,
+    target: ["chrome109"],
+    define: {
+      "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV ?? "production")
+    }
+  }),
+  build({
     entryPoints: [path.join(rootDir, "src/standalone/index.tsx")],
     outfile: path.join(distDir, "standalone.js"),
     bundle: true,

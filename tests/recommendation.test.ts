@@ -45,6 +45,9 @@ describe("recommendProduct", () => {
     expect(result.sizeRecommendation?.recommendedSize).toBe("8")
     expect(result.sizeRecommendation?.confidence).toBe("medium")
     expect(result.recommendedAttributes).toContain("high_waist")
+    expect(result.productSignals).toContain("high_waist")
+    expect(result.matchedProductSignals).toContain("high_waist")
+    expect(result.fitScore).toBeGreaterThanOrEqual(9)
     expect(result.confidence).toBeGreaterThan(0.5)
     expect(result.bodyStateSummary.waistDefinition).toBeGreaterThan(0.5)
   })
@@ -65,6 +68,7 @@ describe("recommendProduct", () => {
     )
 
     expect(result.level).toBe("avoid")
+    expect(result.fitScore).toBe(1)
     expect(result.confidenceNote).toMatch(/ignore rules/i)
   })
 
@@ -93,8 +97,44 @@ describe("recommendProduct", () => {
       riskPreference: "balanced"
     })
 
+    expect(result.level).toBe("needs_data")
+    expect(result.fitScore).toBeLessThanOrEqual(3)
     expect(result.sizeRecommendation?.recommendedSize).toBeUndefined()
     expect(result.sizeRecommendation?.reasons.join(" ")).toMatch(/not enough saved body data/i)
+  })
+
+  it("assigns a higher fit score to the better-matching product", () => {
+    const profile: UserInputProfile = {
+      height: 168,
+      weight: 61,
+      manualMeasurements: {
+        waist: 70,
+        hips: 96
+      },
+      explicitPreferences: {
+        likedRise: ["high"]
+      },
+      riskPreference: "balanced"
+    }
+
+    const betterMatch = recommendProduct(product, profile)
+    const weakerMatch = recommendProduct(
+      {
+        ...product,
+        productId: "prod-2",
+        title: "Low-Rise Training Tight",
+        description: "Low-rise leggings with a softer feel and less hold.",
+        productFeatures: ["Low-rise fit", "Softer handfeel"],
+        attributes: {
+          ...product.attributes,
+          waistRise: "low",
+          compression: "medium"
+        }
+      },
+      profile
+    )
+
+    expect(betterMatch.fitScore).toBeGreaterThan(weakerMatch.fitScore)
   })
 
   it("returns standalone styling advice without product data", () => {

@@ -14,9 +14,20 @@ function average(values: Array<number | undefined>, fallback: number): number {
 }
 
 export function normalizeUserProfile(profile?: UserInputProfile): UserInputProfile {
+  const backImageUrl = profile?.backImageUrl ?? profile?.sideImageUrl
+  const frontImageUrls = Array.from(new Set([...(profile?.frontImageUrls ?? []), ...(profile?.frontImageUrl ? [profile.frontImageUrl] : [])]))
+  const backImageUrls = Array.from(new Set([...(profile?.backImageUrls ?? []), ...(backImageUrl ? [backImageUrl] : [])]))
+
   return {
     ...DEFAULT_PROFILE,
     ...profile,
+    frontImageUrl: profile?.frontImageUrl ?? frontImageUrls[0],
+    frontImageUrls,
+    backImageUrl,
+    backImageUrls,
+    sideImageUrl: profile?.sideImageUrl ?? backImageUrl,
+    imageAnalysis: profile?.imageAnalysis,
+    unitSystem: profile?.unitSystem ?? "metric",
     explicitPreferences: {
       ...DEFAULT_PROFILE.explicitPreferences,
       ...profile?.explicitPreferences
@@ -30,32 +41,51 @@ export function normalizeUserProfile(profile?: UserInputProfile): UserInputProfi
 
 export function deriveBodyProfile(profile?: UserInputProfile): DerivedBodyProfile {
   const normalized = normalizeUserProfile(profile)
+  const backImageUrl = normalized.backImageUrls?.[0] ?? normalized.backImageUrl ?? normalized.sideImageUrl
+  const hasFrontPhotos = (normalized.frontImageUrls?.length ?? 0) > 0 || Boolean(normalized.frontImageUrl)
+  const hasBackPhotos = (normalized.backImageUrls?.length ?? 0) > 0 || Boolean(backImageUrl)
+  const imageAnalysis = normalized.imageAnalysis
+  const imageMeasurements = imageAnalysis?.derivedMeasurements
   const measurements = normalized.manualMeasurements ?? {}
-  const waist = measurements.waist
-  const hips = measurements.hips
-  const bust = measurements.bust
-  const shoulderWidth = measurements.shoulderWidth
+  const waist = measurements.waist ?? imageMeasurements?.estimatedWaist
+  const hips = measurements.hips ?? imageMeasurements?.estimatedHips
+  const bust = measurements.bust ?? imageMeasurements?.estimatedBust
+  const shoulderWidth = measurements.shoulderWidth ?? imageMeasurements?.estimatedShoulderWidth
+  const frontSnapshot = imageAnalysis?.front
+  const backSnapshot = imageAnalysis?.back
   const source: DerivedBodyProfile["source"] =
-    normalized.frontImageUrl && normalized.sideImageUrl
+    imageAnalysis && (measurements.waist !== undefined || measurements.hips !== undefined || measurements.bust !== undefined || measurements.shoulderWidth !== undefined)
       ? "hybrid"
-      : normalized.frontImageUrl || normalized.sideImageUrl
+      : imageAnalysis
+        ? "image_estimation"
+        : hasFrontPhotos && hasBackPhotos
+      ? "hybrid"
+      : hasFrontPhotos || hasBackPhotos
         ? "image_estimation"
         : "manual"
 
   const missingSignals = [
-    normalized.frontImageUrl ? undefined : "front photo",
-    normalized.sideImageUrl ? undefined : "side photo",
+    hasFrontPhotos ? undefined : "front photo",
+    hasBackPhotos ? undefined : "back photo",
     normalized.height ? undefined : "height",
     normalized.weight ? undefined : "weight"
   ].filter((value): value is string => Boolean(value))
 
   const waistFromShape =
-    waist === undefined || (hips === undefined && bust === undefined)
-      ? undefined
-      : average(
+    waist !== undefined && (hips !== undefined || bust !== undefined)
+      ? average(
           [
             hips !== undefined ? clamp((0.92 - waist / hips) / 0.24) : undefined,
             bust !== undefined ? clamp((0.95 - waist / bust) / 0.25) : undefined
+          ],
+          0.5
+        )
+      : average(
+          [
+            frontSnapshot ? clamp((frontSnapshot.bustWidthRatio - frontSnapshot.waistWidthRatio - 0.05) / 0.11) : undefined,
+            frontSnapshot ? clamp((frontSnapshot.hipWidthRatio - frontSnapshot.waistWidthRatio - 0.06) / 0.11) : undefined,
+            backSnapshot ? clamp((backSnapshot.bustWidthRatio - backSnapshot.waistWidthRatio - 0.05) / 0.11) : undefined,
+            backSnapshot ? clamp((backSnapshot.hipWidthRatio - backSnapshot.waistWidthRatio - 0.06) / 0.11) : undefined
           ],
           0.5
         )
@@ -68,7 +98,9 @@ export function deriveBodyProfile(profile?: UserInputProfile): DerivedBodyProfil
     average(
       [
         bust !== undefined && hips !== undefined ? 0.5 + (bust - hips) / 40 : undefined,
-        shoulderWidth !== undefined && hips !== undefined ? 0.5 + (shoulderWidth * 2.3 - hips) / 42 : undefined
+        shoulderWidth !== undefined && hips !== undefined ? 0.5 + (shoulderWidth * 2.3 - hips) / 42 : undefined,
+        frontSnapshot ? 0.5 + (frontSnapshot.bustWidthRatio - frontSnapshot.hipWidthRatio) / 0.12 : undefined,
+        backSnapshot ? 0.5 + (backSnapshot.bustWidthRatio - backSnapshot.hipWidthRatio) / 0.12 : undefined
       ],
       0.5
     )
@@ -93,7 +125,9 @@ export function deriveBodyProfile(profile?: UserInputProfile): DerivedBodyProfil
       [
         0.28 + upperLowerBalance * 0.38,
         bust !== undefined && normalized.height !== undefined ? 0.24 + (bust / normalized.height) * 0.65 : undefined,
-        shoulderWidth !== undefined ? 0.2 + shoulderWidth / 100 : undefined
+        shoulderWidth !== undefined ? 0.2 + shoulderWidth / 100 : undefined,
+        frontSnapshot ? 0.18 + frontSnapshot.bustWidthRatio * 1.25 : undefined,
+        backSnapshot ? 0.16 + backSnapshot.shoulderWidthRatio * 1.18 : undefined
       ],
       0.5
     )
@@ -106,6 +140,8 @@ export function deriveBodyProfile(profile?: UserInputProfile): DerivedBodyProfil
         0.22 + Math.abs(upperLowerBalance - 0.5) * 0.9,
         bust !== undefined && waist !== undefined ? clamp((bust - waist) / 42) : undefined,
         hips !== undefined && waist !== undefined ? clamp((hips - waist) / 45) : undefined,
+        frontSnapshot ? clamp((frontSnapshot.bustWidthRatio - frontSnapshot.waistWidthRatio) / 0.12) : undefined,
+        backSnapshot ? clamp((backSnapshot.hipWidthRatio - backSnapshot.waistWidthRatio) / 0.12) : undefined,
         normalized.supportState === "unsupported"
           ? 0.72
           : normalized.supportState === "light"
@@ -127,8 +163,9 @@ export function deriveBodyProfile(profile?: UserInputProfile): DerivedBodyProfil
     waist !== undefined ? 0.12 : 0,
     hips !== undefined ? 0.12 : 0,
     shoulderWidth !== undefined ? 0.08 : 0,
-    normalized.frontImageUrl ? 0.12 : 0,
-    normalized.sideImageUrl ? 0.15 : 0,
+    imageAnalysis ? imageAnalysis.confidence * 0.22 : 0,
+    hasFrontPhotos ? 0.05 : 0,
+    hasBackPhotos ? 0.07 : 0,
     normalized.supportState ? 0.05 : 0
   ].reduce((sum, value) => sum + value, 0)
 
@@ -150,9 +187,33 @@ export function deriveBodyProfile(profile?: UserInputProfile): DerivedBodyProfil
       waistDefinition:
         waistFromShape === undefined ? undefined : waistDefinition >= 0.66 ? "high" : waistDefinition >= 0.42 ? "medium" : "low",
       bustPresence:
-        bust === undefined ? undefined : bust < 84 ? "small" : bust > 96 ? "full" : "medium",
+        bust === undefined
+          ? frontSnapshot
+            ? frontSnapshot.bustWidthRatio < 0.22
+              ? "small"
+              : frontSnapshot.bustWidthRatio > 0.29
+                ? "full"
+                : "medium"
+            : undefined
+          : bust < 84
+            ? "small"
+            : bust > 96
+              ? "full"
+              : "medium",
       hipPresence:
-        hips === undefined ? undefined : hips < 90 ? "narrow" : hips > 102 ? "full" : "balanced",
+        hips === undefined
+          ? frontSnapshot
+            ? frontSnapshot.hipWidthRatio < 0.24
+              ? "narrow"
+              : frontSnapshot.hipWidthRatio > 0.31
+                ? "full"
+                : "balanced"
+            : undefined
+          : hips < 90
+            ? "narrow"
+            : hips > 102
+              ? "full"
+              : "balanced",
       torsoLength:
         normalized.height === undefined ? undefined : normalized.height < 158 ? "short" : normalized.height > 172 ? "long" : "balanced"
     },

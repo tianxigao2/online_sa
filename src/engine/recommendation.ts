@@ -67,6 +67,16 @@ const ATTRIBUTE_FAMILIES: Record<AttributeFamily, AttributeId[]> = {
   ]
 }
 
+const ATTRIBUTE_TO_FAMILY = Object.entries(ATTRIBUTE_FAMILIES).reduce<Record<AttributeId, AttributeFamily>>(
+  (record, [family, attributes]) => {
+    attributes.forEach((attribute) => {
+      record[attribute] = family as AttributeFamily
+    })
+    return record
+  },
+  {} as Record<AttributeId, AttributeFamily>
+)
+
 const ALL_STYLE_FAMILIES: AttributeFamily[] = ["neckline", "waistline", "silhouette", "strapSleeve", "length", "fabric"]
 
 const CATEGORY_FAMILIES: Record<ApparelCategory, AttributeFamily[]> = {
@@ -133,6 +143,10 @@ function clamp(value: number, minimum = 0, maximum = 1): number {
 
 function round(value: number): number {
   return Number(value.toFixed(2))
+}
+
+function clampInteger(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, Math.round(value)))
 }
 
 function containsToken(text: string, value: string): boolean {
@@ -597,13 +611,31 @@ function topAttributes(
   state: AttributeState,
   comparator: (score: number) => boolean,
   limit: number,
-  descending: boolean
+  descending: boolean,
+  maxPerFamily = Number.POSITIVE_INFINITY
 ): AttributeId[] {
+  const familyCounts = new Map<AttributeFamily, number>()
+
   return (Object.entries(state) as Array<[AttributeId, { score: number }]>)
     .filter(([, details]) => comparator(details.score))
     .sort((left, right) => descending ? right[1].score - left[1].score : left[1].score - right[1].score)
-    .slice(0, limit)
-    .map(([attribute]) => attribute)
+    .reduce<AttributeId[]>((selected, [attribute]) => {
+      if (selected.length >= limit) {
+        return selected
+      }
+
+      const family = ATTRIBUTE_TO_FAMILY[attribute]
+      const currentCount = family ? (familyCounts.get(family) ?? 0) : 0
+      if (family && currentCount >= maxPerFamily) {
+        return selected
+      }
+
+      if (family) {
+        familyCounts.set(family, currentCount + 1)
+      }
+      selected.push(attribute)
+      return selected
+    }, [])
 }
 
 function collectAdviceReasons(
@@ -871,9 +903,15 @@ function buildConfidenceNote(
   fitRisks: RecommendationResult["fitRisks"]
 ): string | undefined {
   const segments: string[] = []
+  const frontCount = profile.frontImageUrls?.length ?? (profile.frontImageUrl ? 1 : 0)
+  const backCount = profile.backImageUrls?.length ?? (profile.backImageUrl ?? profile.sideImageUrl ? 1 : 0)
 
-  if (!profile.frontImageUrl || !profile.sideImageUrl) {
-    segments.push("Body-state inference is running on measurements and saved profile signals because front and side photos are not both available.")
+  if (frontCount === 0 || backCount === 0) {
+    segments.push("Body-state inference is running on measurements and saved profile signals because front and back photos are not both available.")
+  } else if (profile.imageAnalysis) {
+    segments.push("Saved photo analysis contributed silhouette-derived body measurements to this recommendation.")
+  } else {
+    segments.push("Photos are saved, but the body-profile run could not extract a usable silhouette from them.")
   }
 
   if (!product.sizeChart?.table?.length) {
@@ -893,17 +931,23 @@ function buildConfidenceNote(
 
 function buildStyleAdviceNote(profile: UserInputProfile, bodyProfileConfidence: number): string | undefined {
   const segments: string[] = []
+  const frontCount = profile.frontImageUrls?.length ?? (profile.frontImageUrl ? 1 : 0)
+  const backCount = profile.backImageUrls?.length ?? (profile.backImageUrl ?? profile.sideImageUrl ? 1 : 0)
 
-  if (!profile.frontImageUrl || !profile.sideImageUrl) {
-    segments.push("Photo-aware advice works best with both front and side images; for now the engine is relying more heavily on body specs and saved preferences.")
+  if (frontCount === 0 || backCount === 0) {
+    segments.push("Photo-aware advice works best with both front and back images; for now the engine is relying more heavily on body specs and saved preferences.")
+  } else if (profile.imageAnalysis) {
+    segments.push("This advice includes silhouette ratios extracted from your saved body photos, not just the fact that photos exist.")
+  } else {
+    segments.push("Photos are saved, but the current run could not derive a clean silhouette from them, so the engine is leaning back on manual body specs.")
   }
 
   if (bodyProfileConfidence < 0.5) {
     segments.push("Confidence is intentionally moderated because the profile is still sparse.")
   }
 
-  if (profile.frontImageUrl || profile.sideImageUrl) {
-    segments.push("Images are currently treated as supporting evidence and confidence signals; the dedicated vision extraction layer is still a future step.")
+  if (profile.imageAnalysis?.notes.length) {
+    segments.push(profile.imageAnalysis.notes[0]!)
   }
 
   return segments.length ? segments.join(" ") : undefined
@@ -917,6 +961,85 @@ function normalizeAlignmentScore(score: number, riskPenalty: number): Recommenda
   return "cautious"
 }
 
+function remapClamped(
+  value: number,
+  inputMin: number,
+  inputMax: number,
+  outputMin: number,
+  outputMax: number
+): number {
+  if (inputMax <= inputMin) {
+    return outputMin
+  }
+
+  const ratio = clamp((value - inputMin) / (inputMax - inputMin))
+  return outputMin + ratio * (outputMax - outputMin)
+}
+
+function computeFitScore(
+  level: RecommendationResult["level"],
+  confidence: number,
+  alignmentScore = 0,
+  riskPenalty = 0
+): number {
+  if (level === "needs_data") {
+    return clampInteger(remapClamped(confidence, 0, 0.45, 1, 3), 1, 3)
+  }
+
+  const net = alignmentScore - riskPenalty
+
+  if (level === "avoid") {
+    return clampInteger(remapClamped(net, -3, -1.1, 1, 3), 1, 3)
+  }
+
+  if (level === "cautious") {
+    return clampInteger(remapClamped(net, -1.1, 0.7, 4, 6), 4, 6)
+  }
+
+  if (level === "try") {
+    return clampInteger(remapClamped(net, 0.7, 2.2, 7, 8), 7, 8)
+  }
+
+  return clampInteger(remapClamped(net, 2.2, 4.2, 9, 10), 9, 10)
+}
+
+function hasMeaningfulProfileSignals(profile: UserInputProfile): boolean {
+  const explicitPreferences = profile.explicitPreferences
+  const preferenceCount =
+    [
+      explicitPreferences?.likedFits,
+      explicitPreferences?.dislikedFits,
+      explicitPreferences?.likedLengths,
+      explicitPreferences?.dislikedLengths,
+      explicitPreferences?.likedNecklines,
+      explicitPreferences?.dislikedNecklines,
+      explicitPreferences?.likedRise,
+      explicitPreferences?.dislikedRise,
+      explicitPreferences?.likedSupportLevels,
+      explicitPreferences?.dislikedSupportLevels,
+      profile.useCases,
+      profile.styleGoals,
+      profile.avoidRules
+    ]
+      .flatMap((value) => value ?? [])
+      .filter(Boolean).length
+
+  const bodySignals = [
+    profile.height,
+    profile.weight,
+    profile.manualMeasurements?.bust,
+    profile.manualMeasurements?.waist,
+    profile.manualMeasurements?.hips,
+    profile.manualMeasurements?.shoulderWidth,
+    profile.supportState,
+    profile.frontImageUrls?.length ?? profile.frontImageUrl,
+    profile.backImageUrls?.length ?? profile.backImageUrl ?? profile.sideImageUrl,
+    profile.imageAnalysis?.confidence
+  ].filter(Boolean).length
+
+  return bodySignals >= 2 || preferenceCount >= 2
+}
+
 export function recommendProduct(
   product: StructuredProduct,
   profileInput?: UserInputProfile,
@@ -924,18 +1047,30 @@ export function recommendProduct(
 ): RecommendationResult {
   const profile = normalizeUserProfile(profileInput)
   const ignoreRule = evaluateIgnoreRules(product, ignoreRules)
+  const detectedSignals = Array.from(productSignalSet(product)) as AttributeId[]
 
   if (ignoreRule) {
     return {
       level: "avoid",
+      fitScore: 1,
       reasons: [`Local ignore rule "${ignoreRule.label}" matched this product.`],
       risks: ["You previously asked not to surface similar items."],
       occasions: product.attributes.intendedUse ?? [],
+      productSignals: detectedSignals,
+      matchedProductSignals: [],
+      conditionalProductSignals: [],
+      conflictingProductSignals: [],
       recommendedAttributes: [],
       conditionalAttributes: [],
       lowPriorityAttributes: [],
       fitRisks: [],
       confidence: 0.2,
+      confidenceBreakdown: {
+        profileCoverage: 0,
+        riskAdjustment: 0.2,
+        productDetail: 0,
+        sizeChartDetail: 0
+      },
       bodyStateSummary: {
         upperLowerBalance: 0.5,
         waistDefinition: 0.5,
@@ -948,15 +1083,50 @@ export function recommendProduct(
   }
 
   const bodyProfile = deriveBodyProfile(profile)
+  if (bodyProfile.confidence < 0.45 && !hasMeaningfulProfileSignals(profile)) {
+    const confidence = round(bodyProfile.confidence)
+    return {
+      level: "needs_data",
+      fitScore: computeFitScore("needs_data", confidence),
+      sizeRecommendation: recommendSize(product, profile),
+      reasons: [
+        "Save a few profile inputs first so the engine can judge fit and silhouette with less guesswork."
+      ],
+      risks: [],
+      occasions: clampList(product.attributes.intendedUse ?? [], 4),
+      productSignals: detectedSignals,
+      matchedProductSignals: [],
+      conditionalProductSignals: [],
+      conflictingProductSignals: [],
+      recommendedAttributes: [],
+      conditionalAttributes: [],
+      lowPriorityAttributes: [],
+      fitRisks: [],
+      confidence,
+      confidenceBreakdown: {
+        profileCoverage: confidence,
+        riskAdjustment: 0,
+        productDetail: 0,
+        sizeChartDetail: 0
+      },
+      bodyStateSummary: bodyProfile.bodyStateSummary,
+      confidenceNote: "Current profile evidence is too thin for a real recommendation. Add height, weight, measurements, or explicit style preferences."
+    }
+  }
+
   const families = applicableFamilies(product.category)
   const attributeState = buildAttributeState(families)
   applyBodyStateRules(attributeState, families, product.category, profile, bodyProfile.bodyStateSummary)
   applyPreferenceRules(attributeState, profile)
 
-  const recommendedAttributes = topAttributes(attributeState, (score) => score >= 0.75, 5, true)
-  const conditionalAttributes = topAttributes(attributeState, (score) => score >= 0.2 && score < 0.75, 4, true)
-  const lowPriorityAttributes = topAttributes(attributeState, (score) => score <= -0.45, 5, false)
-  const signals = productSignalSet(product)
+  const recommendedAttributes = topAttributes(attributeState, (score) => score >= 0.75, 5, true, 1)
+  const conditionalAttributes = topAttributes(attributeState, (score) => score >= 0.2 && score < 0.75, 4, true, 1)
+  const lowPriorityAttributes = topAttributes(attributeState, (score) => score <= -0.45, 5, false, 1)
+  const signals = new Set<AttributeId>(detectedSignals)
+  const productSignals = [...detectedSignals]
+  const matchedProductSignals = productSignals.filter((signal) => recommendedAttributes.includes(signal))
+  const conditionalProductSignals = productSignals.filter((signal) => conditionalAttributes.includes(signal))
+  const conflictingProductSignals = productSignals.filter((signal) => lowPriorityAttributes.includes(signal))
 
   const haystack = [
     product.title,
@@ -1038,20 +1208,36 @@ export function recommendProduct(
     fitRisks.reduce((sum, risk) => sum + risk.confidence, 0) * 0.42 +
     fitRisks.filter((risk) => risk.confidence >= 0.7).length * 0.18
 
+  const profileCoverage = bodyProfile.confidence * 0.65
+  const riskAdjustment = clamp(1 - riskPenalty / 3) * 0.2
+  const productDetail = product.description ? 0.08 : 0.03
+  const sizeChartDetail = product.sizeChart?.table?.length ? 0.07 : 0.02
   const level = normalizeAlignmentScore(alignmentScore, riskPenalty)
-  const confidence = round(clamp(bodyProfile.confidence * 0.65 + clamp(1 - riskPenalty / 3) * 0.2 + (product.description ? 0.08 : 0.03) + (product.sizeChart?.table?.length ? 0.07 : 0.02)))
+  const confidence = round(clamp(profileCoverage + riskAdjustment + productDetail + sizeChartDetail))
+  const fitScore = computeFitScore(level, confidence, alignmentScore, riskPenalty)
 
   return {
     level,
+    fitScore,
     sizeRecommendation: recommendSize(product, profile),
     reasons: clampList(reasons, 3),
     risks: clampList(risks, 4),
     occasions: clampList(product.attributes.intendedUse ?? [], 4),
+    productSignals,
+    matchedProductSignals,
+    conditionalProductSignals,
+    conflictingProductSignals,
     recommendedAttributes,
     conditionalAttributes,
     lowPriorityAttributes,
     fitRisks,
     confidence,
+    confidenceBreakdown: {
+      profileCoverage: round(profileCoverage),
+      riskAdjustment: round(riskAdjustment),
+      productDetail: round(productDetail),
+      sizeChartDetail: round(sizeChartDetail)
+    },
     bodyStateSummary: bodyProfile.bodyStateSummary,
     confidenceNote: buildConfidenceNote(profile, product, bodyProfile.confidence, fitRisks)
   }

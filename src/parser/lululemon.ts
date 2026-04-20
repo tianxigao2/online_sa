@@ -37,6 +37,11 @@ function readText(doc: Document, selector: string): string | undefined {
   return doc.querySelector(selector)?.textContent?.replace(/\s+/g, " ").trim() || undefined
 }
 
+function normalizeText(value: string | null | undefined): string | undefined {
+  const normalized = value?.replace(/\s+/g, " ").trim()
+  return normalized ? normalized : undefined
+}
+
 function parsePrice(value: unknown): number | undefined {
   if (typeof value === "number") {
     return value
@@ -241,6 +246,90 @@ function extractPriceFromNearbyText(node: Element): { price?: number; salePrice?
   }
 }
 
+function extractCollectionCardRoot(anchor: HTMLAnchorElement): Element {
+  let current: Element | null = anchor
+
+  for (let depth = 0; current && depth < 6; depth += 1, current = current.parentElement) {
+    const text = normalizeText(current.textContent) ?? ""
+    const hasImage = Boolean(current.querySelector("img"))
+    const hasPrice = /\$\d/.test(text) || /sale price|regular price/i.test(text)
+    const productLinks = current.querySelectorAll('a[href*="/p/"]').length
+
+    if (productLinks > 0 && (hasImage || hasPrice)) {
+      return current
+    }
+  }
+
+  return anchor
+}
+
+function titleFromProductUrl(url: string): string | undefined {
+  try {
+    const parsedUrl = new URL(url)
+    const segments = parsedUrl.pathname.split("/").filter(Boolean)
+    const slug = [...segments].reverse().find((segment) => segment !== "_" && !/^prod\d+$/i.test(segment))
+    if (!slug) {
+      return undefined
+    }
+
+    const normalized = slug
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+
+    if (!normalized) {
+      return undefined
+    }
+
+    return normalized.replace(/\b\w/g, (token) => token.toUpperCase())
+  } catch {
+    return undefined
+  }
+}
+
+function looksLikeProductTitle(text: string): boolean {
+  const normalized = text.trim()
+  if (!normalized) {
+    return false
+  }
+
+  if (normalized.length < 4 || normalized.length > 140) {
+    return false
+  }
+
+  if (/^\$/.test(normalized)) {
+    return false
+  }
+
+  if (/sale price|regular price|wishlist|quick add|select size|add to bag/i.test(normalized)) {
+    return false
+  }
+
+  return /[a-z]/i.test(normalized)
+}
+
+function extractCollectionTitle(anchor: HTMLAnchorElement, cardRoot: Element, absoluteUrl: string): string | undefined {
+  const directAnchorText = normalizeText(anchor.textContent)
+  if (directAnchorText && looksLikeProductTitle(directAnchorText)) {
+    return directAnchorText
+  }
+
+  const headingText = Array.from(cardRoot.querySelectorAll("h1, h2, h3, h4, [data-testid*='product' i], [data-test*='product' i]"))
+    .map((node) => normalizeText(node.textContent))
+    .find((text): text is string => typeof text === "string" && looksLikeProductTitle(text))
+
+  if (headingText) {
+    return headingText
+  }
+
+  const imageAlt = normalizeText(cardRoot.querySelector("img")?.getAttribute("alt"))
+  if (imageAlt && looksLikeProductTitle(imageAlt)) {
+    return imageAlt
+  }
+
+  return titleFromProductUrl(absoluteUrl)
+}
+
 function hasButtonWithText(doc: Document, text: string): boolean {
   const normalizedTarget = text.trim().toLowerCase()
   return Array.from(doc.querySelectorAll("button, [role='button'], input[type='button'], input[type='submit']")).some(
@@ -315,10 +404,11 @@ export function parseLululemonProductPage(
   const breadcrumbTrail = extractBreadcrumbTrail(doc)
   const description = extractDescription(doc, structuredProduct)
   const productFeatures = extractLists(doc)
-  const categoryHint = classifyApparelCategory(title, description, breadcrumbTrail.join(" "))
+  const categoryHint = classifyApparelCategory(title, description, breadcrumbTrail.join(" "), url)
   const rawText = [title, description, breadcrumbTrail.join(" "), productFeatures.join(" ")].join(" ")
+  const excludedByKeyword = isExcludedProduct(title, breadcrumbTrail.join(" "), url)
 
-  if (isExcludedProduct(title, description, breadcrumbTrail.join(" "))) {
+  if (excludedByKeyword && categoryHint === "unknown") {
     return {
       isProductPage: true,
       supported: false,
@@ -344,7 +434,7 @@ export function parseLululemonProductPage(
 
   return {
     isProductPage: true,
-    supported: categoryHint !== "unknown" || !isExcludedProduct(rawText),
+    supported: categoryHint !== "unknown" || !excludedByKeyword,
     rawProduct
   }
 }
@@ -366,19 +456,26 @@ export function parseLululemonCollectionPage(
   const itemsById = new Map<string, ParsedCollectionItem>()
 
   anchors.forEach((anchor) => {
-    const title = anchor.textContent?.replace(/\s+/g, " ").trim()
     const href = anchor.href
-    if (!title || !href) {
+    if (!href) {
       return
     }
 
     const absoluteUrl = new URL(href, url).toString()
+    const cardRoot = extractCollectionCardRoot(anchor)
+    const title = extractCollectionTitle(anchor, cardRoot, absoluteUrl)
+    if (!title) {
+      return
+    }
+
     const productId = inferProductIdFromUrl(absoluteUrl)
     if (itemsById.has(productId)) {
       return
     }
 
-    const priceSignals = extractPriceFromNearbyText(anchor)
+    const cardText = normalizeText(cardRoot.textContent)
+    const thumbnail = cardRoot.querySelector<HTMLImageElement>("img")
+    const priceSignals = extractPriceFromNearbyText(cardRoot)
     itemsById.set(productId, {
       source: "lululemon",
       productId,
@@ -387,6 +484,9 @@ export function parseLululemonCollectionPage(
       price: priceSignals.price,
       salePrice: priceSignals.salePrice,
       categoryHint: categoryHint === "unknown" ? pageTitle : categoryHint,
+      thumbnailUrl: thumbnail?.currentSrc || thumbnail?.src || undefined,
+      thumbnailAlt: normalizeText(thumbnail?.getAttribute("alt")),
+      cardText,
       anchorSelector: `a[href="${anchor.getAttribute("href")}"]`
     })
   })

@@ -88,6 +88,81 @@ describe("parseLululemonProductPage", () => {
     expect(parsed.unsupportedReason).toMatch(/accessory or equipment/i)
   })
 
+  it("keeps clearly classified apparel products even when another field says accessories", () => {
+    const dom = new JSDOM(
+      `
+        <html>
+          <head>
+            <script type="application/ld+json">
+              {
+                "@context": "https://schema.org",
+                "@type": "Product",
+                "name": "Define Jacket Nulu",
+                "category": "Accessories",
+                "description": "Close-fitting jacket with a soft feel.",
+                "offers": {
+                  "@type": "Offer",
+                  "priceCurrency": "USD",
+                  "price": "128"
+                }
+              }
+            </script>
+          </head>
+          <body>
+            <h1>Define Jacket Nulu</h1>
+            <button>Add to Bag</button>
+            <button aria-label="Size 4">4</button>
+            <ul>
+              <li>Lightweight, everyday layer</li>
+            </ul>
+          </body>
+        </html>
+      `,
+      { url: "https://shop.lululemon.com/p/jackets-and-hoodies-jackets/Define-Jacket-Nulu/_/prod11020158" }
+    )
+
+    const parsed = parseLululemonProductPage(dom.window.document, dom.window.location.href)
+    expect(parsed.isProductPage).toBe(true)
+    expect(parsed.supported).toBe(true)
+    expect(parsed.unsupportedReason).toBeUndefined()
+    expect(parsed.rawProduct?.rawCategoryHint).toBe("jackets")
+  })
+
+  it("uses the product url instead of noisy page text to keep jacket pages supported", () => {
+    const dom = new JSDOM(
+      `
+        <html>
+          <head>
+            <script type="application/ld+json">
+              {
+                "@context": "https://schema.org",
+                "@type": "Product",
+                "name": "Define Nulu",
+                "description": "Add to Bag and browse Accessories",
+                "offers": {
+                  "@type": "Offer",
+                  "priceCurrency": "USD",
+                  "price": "128"
+                }
+              }
+            </script>
+          </head>
+          <body>
+            <button>Add to Bag</button>
+            <div>Accessories</div>
+          </body>
+        </html>
+      `,
+      { url: "https://shop.lululemon.com/p/jackets-and-hoodies-jackets/Define-Jacket-Nulu/_/prod11020158?color=71918" }
+    )
+
+    const parsed = parseLululemonProductPage(dom.window.document, dom.window.location.href)
+    expect(parsed.isProductPage).toBe(true)
+    expect(parsed.supported).toBe(true)
+    expect(parsed.unsupportedReason).toBeUndefined()
+    expect(parsed.rawProduct?.rawCategoryHint).toBe("jackets")
+  })
+
   it("does not treat collection pages as product detail pages", () => {
     const dom = new JSDOM(
       `
@@ -134,5 +209,31 @@ describe("parseLululemonProductPage", () => {
     expect(parsed.items).toHaveLength(2)
     expect(parsed.items[0]?.title).toBe("2-in-1 Maxi Dress")
     expect(parsed.items[1]?.salePrice).toBe(64)
+  })
+
+  it("extracts collection cards from image-led layouts without anchor text", () => {
+    const dom = new JSDOM(
+      `
+        <html>
+          <body>
+            <h1>Women's Tanks</h1>
+            <article>
+              <a href="/p/women-tanks/Define-Full-Zip-Tank-Top-Luon/_/prod20003001">
+                <img src="https://images.lululemon.com/define.jpg" alt="Define Full-Zip Tank Top Luon" />
+              </a>
+              <div>Sale Price $89 Regular Price $118</div>
+            </article>
+          </body>
+        </html>
+      `,
+      { url: "https://shop.lululemon.com/c/women-tanks/n1abc" }
+    )
+
+    const parsed = parseLululemonCollectionPage(dom.window.document, dom.window.location.href)
+    expect(parsed.isCollectionPage).toBe(true)
+    expect(parsed.items).toHaveLength(1)
+    expect(parsed.items[0]?.title).toBe("Define Full-Zip Tank Top Luon")
+    expect(parsed.items[0]?.thumbnailAlt).toBe("Define Full-Zip Tank Top Luon")
+    expect(parsed.items[0]?.salePrice).toBe(89)
   })
 })

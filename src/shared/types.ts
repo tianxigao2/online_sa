@@ -23,12 +23,53 @@ export type ApparelCategory =
 export type RiskPreference = "safe" | "balanced" | "adventurous"
 export type SupportState = "unsupported" | "light" | "medium" | "high"
 export type AttributeFamily = "neckline" | "waistline" | "silhouette" | "strapSleeve" | "length" | "fabric"
+export type MeasurementSystem = "metric" | "imperial"
+export type ImageAnalysisSource = "upload" | "url" | "mixed"
+
+export interface SilhouetteSnapshot {
+  visibleHeightRatio: number
+  shoulderWidthRatio: number
+  bustWidthRatio: number
+  waistWidthRatio: number
+  hipWidthRatio: number
+  symmetry: number
+  maskCoverage: number
+}
+
+export interface ImageBodyAnalysis {
+  analyzedAt: number
+  source: ImageAnalysisSource
+  confidence: number
+  frontSamples?: number
+  backSamples?: number
+  front?: SilhouetteSnapshot
+  back?: SilhouetteSnapshot
+  derivedMeasurements?: {
+    estimatedBust?: number
+    estimatedWaist?: number
+    estimatedHips?: number
+    estimatedShoulderWidth?: number
+  }
+  notes: string[]
+}
+
+export interface SavedUserProfile {
+  id: string
+  nickname: string
+  updatedAt: number
+  profile: UserInputProfile
+}
 
 export interface UserInputProfile {
   height?: number
   weight?: number
   frontImageUrl?: string
+  frontImageUrls?: string[]
+  backImageUrl?: string
+  backImageUrls?: string[]
   sideImageUrl?: string
+  imageAnalysis?: ImageBodyAnalysis
+  unitSystem?: MeasurementSystem
   supportState?: SupportState
   styleGoals?: string[]
   manualMeasurements?: {
@@ -125,7 +166,8 @@ export interface StructuredProduct {
 }
 
 export interface RecommendationResult {
-  level: "strong" | "try" | "cautious" | "avoid"
+  level: "strong" | "try" | "cautious" | "avoid" | "needs_data"
+  fitScore: number
   sizeRecommendation?: {
     recommendedSize?: string
     confidence: "high" | "medium" | "low"
@@ -135,6 +177,10 @@ export interface RecommendationResult {
   reasons: string[]
   risks: string[]
   occasions: string[]
+  productSignals: string[]
+  matchedProductSignals: string[]
+  conditionalProductSignals: string[]
+  conflictingProductSignals: string[]
   recommendedAttributes: string[]
   conditionalAttributes: string[]
   lowPriorityAttributes: string[]
@@ -144,6 +190,12 @@ export interface RecommendationResult {
     reason: string
   }>
   confidence: number
+  confidenceBreakdown: {
+    profileCoverage: number
+    riskAdjustment: number
+    productDetail: number
+    sizeChartDetail: number
+  }
   bodyStateSummary: DerivedBodyProfile["bodyStateSummary"]
   confidenceNote?: string
 }
@@ -211,6 +263,9 @@ export interface ParsedCollectionItem {
   price?: number
   salePrice?: number
   categoryHint?: string
+  thumbnailUrl?: string
+  thumbnailAlt?: string
+  cardText?: string
   anchorSelector?: string
 }
 
