@@ -12,7 +12,10 @@ coverage/
 !.env.example
 
 # Local examples
-example
+!example/
+example/*
+!example/generated/
+!example/generated/**
 
 # Logs
 npm-debug.log*

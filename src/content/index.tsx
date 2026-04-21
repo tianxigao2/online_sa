@@ -2,18 +2,26 @@ import React from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { recommendProduct } from "../engine/recommendation"
 import { normalizeLululemonProduct } from "../normalizer/lululemon"
+import { normalizeReformationProduct } from "../normalizer/reformation"
+import { normalizeSkimsProduct } from "../normalizer/skims"
+import { normalizeCollectionItem } from "../mapping/collection"
 import { parseLululemonCollectionPage, parseLululemonProductPage } from "../parser/lululemon"
+import { parseReformationCollectionPage, parseReformationProductPage } from "../parser/reformation"
+import { parseSkimsCollectionPage, parseSkimsProductPage } from "../parser/skims"
 import { addIgnoreRule, getIgnoreRules, removeIgnoreRule } from "../storage/localStore"
 import { getActiveProfileId, getPanelLayout, getSavedProfiles, getUserProfile, savePanelLayout, selectUserProfile } from "../storage/localStore"
-import type { IgnoreRule, ParsedCollectionItem, RecommendationResult, StructuredProduct } from "../shared/types"
+import { detectProductSource, productSourceLabel } from "../shared/sources"
+import type { IgnoreRule, ParsedCollectionItem, ParsedRawProduct, ProductSource, RecommendationResult, StructuredProduct } from "../shared/types"
 import { ProductPanel } from "./panel"
 import { panelStyles } from "./styles"
 
-const CONTAINER_ID = "lululemon-fit-signal-root"
+const CONTAINER_ID = "fit-signal-root"
 const PANEL_TOP_DEFAULT = 96
 const PANEL_MARGIN = 16
 const PANEL_WIDTH = 340
 const COLLAPSED_PANEL_WIDTH = 196
+const CATALOG_NODE_SELECTOR =
+  "[data-search-component='search-results'], .search-results, [data-product-tile], [data-product-container='pdp'], .main--product-show, a[href*='/products/'], [data-product-description]"
 
 let root: Root | undefined
 let shadowRoot: ShadowRoot | undefined
@@ -21,6 +29,48 @@ let lastUrl = window.location.href
 let lastIgnoredRule: IgnoreRule | undefined
 let renderTimer: number | undefined
 let pendingNavigationTimers: number[] = []
+
+function isOwnedOverlayNode(node: Node | null): boolean {
+  if (!(node instanceof Element)) {
+    return false
+  }
+
+  return Boolean(
+    node.id === CONTAINER_ID ||
+      node.closest(`#${CONTAINER_ID}`) ||
+      node.classList.contains("lfs-inline-badge")
+  )
+}
+
+function isRelevantCatalogNode(node: Node | null): boolean {
+  if (!(node instanceof Element)) {
+    return false
+  }
+
+  return Boolean(
+    node.matches?.(CATALOG_NODE_SELECTOR) ||
+      node.querySelector?.(CATALOG_NODE_SELECTOR) ||
+      node.closest?.(CATALOG_NODE_SELECTOR)
+  )
+}
+
+function mutationNeedsRender(mutations: MutationRecord[]): boolean {
+  return mutations.some((mutation) => {
+    if (isOwnedOverlayNode(mutation.target) || !isRelevantCatalogNode(mutation.target)) {
+      return false
+    }
+
+    if (mutation.type === "attributes" || mutation.type === "characterData") {
+      return true
+    }
+
+    const changedNodes = [...Array.from(mutation.addedNodes), ...Array.from(mutation.removedNodes)].filter(
+      (node) => !isOwnedOverlayNode(node)
+    )
+
+    return changedNodes.some((node) => isRelevantCatalogNode(node))
+  })
+}
 
 function estimatePanelWidth(collapsed: boolean): number {
   return collapsed ? COLLAPSED_PANEL_WIDTH : PANEL_WIDTH
@@ -222,6 +272,43 @@ function levelLabel(level: RecommendationResult["level"]): string {
   }
 }
 
+function parseCollectionPage(source: ProductSource, doc: Document, url: string) {
+  switch (source) {
+    case "reformation":
+      return parseReformationCollectionPage(doc, url)
+    case "skims":
+      return parseSkimsCollectionPage(doc, url)
+    case "lululemon":
+      return parseLululemonCollectionPage(doc, url)
+  }
+}
+
+function parseProductPage(source: ProductSource, doc: Document, url: string) {
+  switch (source) {
+    case "reformation":
+      return parseReformationProductPage(doc, url)
+    case "skims":
+      return parseSkimsProductPage(doc, url)
+    case "lululemon":
+      return parseLululemonProductPage(doc, url)
+  }
+}
+
+function normalizeProduct(product: ParsedRawProduct | undefined): StructuredProduct {
+  if (!product) {
+    throw new Error("Cannot normalize an empty product.")
+  }
+
+  switch (product.source) {
+    case "reformation":
+      return normalizeReformationProduct(product)
+    case "skims":
+      return normalizeSkimsProduct(product)
+    case "lululemon":
+      return normalizeLululemonProduct(product)
+  }
+}
+
 function ensureMountNode(): ShadowRoot {
   const existing = document.getElementById(CONTAINER_ID)
   const host = existing ?? Object.assign(document.createElement("div"), { id: CONTAINER_ID })
@@ -244,7 +331,7 @@ function ensureMountNode(): ShadowRoot {
   }
 
   shadowRoot = host.shadowRoot ?? undefined
-  document.documentElement.setAttribute("data-lululemon-fit-signal", "loaded")
+  document.documentElement.setAttribute("data-fit-signal", "loaded")
   return shadowRoot!
 }
 
@@ -254,26 +341,7 @@ function clearCollectionHighlights() {
 }
 
 function makeCollectionProduct(item: ParsedCollectionItem, categoryHint?: string): StructuredProduct {
-  const quickScanText = [item.title, item.thumbnailAlt, item.cardText, item.categoryHint, categoryHint]
-    .filter(Boolean)
-    .join(" ")
-
-  return normalizeLululemonProduct({
-    source: "lululemon",
-    productId: item.productId,
-    url: item.url,
-    title: item.title,
-    breadcrumbTrail: [categoryHint ?? item.categoryHint ?? ""].filter(Boolean),
-    rawCategoryHint: item.categoryHint ?? categoryHint,
-    price: item.price,
-    salePrice: item.salePrice,
-    currency: "USD",
-    availableSizes: [],
-    description: item.thumbnailAlt ?? item.cardText ?? item.title,
-    productFeatures: item.cardText ? [item.cardText] : item.thumbnailAlt ? [item.thumbnailAlt] : [],
-    materials: [],
-    rawText: quickScanText
-  })
+  return normalizeCollectionItem(item, categoryHint)
 }
 
 function collectItemWhy(recommendation: RecommendationResult): string {
@@ -306,11 +374,28 @@ function highlightCollectionItems(items: Array<{ item: ParsedCollectionItem; rec
 async function renderPanel(): Promise<void> {
   ensureMountNode()
 
-  const collection = parseLululemonCollectionPage(document, window.location.href)
-  const parsed = parseLululemonProductPage(document, window.location.href)
+  const source = detectProductSource(window.location.href)
   if (!root) {
     return
   }
+
+  if (!source) {
+    root.render(
+      <FloatingPanel
+        debug
+        panelProps={{
+          statusMessage: "LFS loaded: current site is not supported yet.",
+          onOpenSettings: openSettingsPage,
+          onIgnoreSimilar: () => undefined
+        }}
+      />
+    )
+    return
+  }
+
+  const sourceLabel = productSourceLabel(source)
+  const collection = parseCollectionPage(source, document, window.location.href)
+  const parsed = parseProductPage(source, document, window.location.href)
 
   const [savedProfiles, activeProfileId] = await Promise.all([getSavedProfiles(), getActiveProfileId()])
   const handleSelectProfile = async (profileId: string) => {
@@ -333,14 +418,62 @@ async function renderPanel(): Promise<void> {
         return right.recommendation.confidence - left.recommendation.confidence
       })
 
+    const allNeedMoreData =
+      recommendations.length > 0 && recommendations.every(({ recommendation }) => recommendation.level === "needs_data")
+
+    if (recommendations.length === 0) {
+      clearCollectionHighlights()
+      root.render(
+        <FloatingPanel
+          debug
+          panelProps={{
+            brandLabel: sourceLabel,
+            statusMessage: `LFS found a ${sourceLabel} collection page, but could not rank any product cards yet.`,
+            savedProfiles,
+            activeProfileId,
+            onSelectProfile: (profileId) => {
+              void handleSelectProfile(profileId)
+            },
+            onOpenSettings: openSettingsPage,
+            onIgnoreSimilar: () => undefined
+          }}
+        />
+      )
+      return
+    }
+
+    if (allNeedMoreData) {
+      clearCollectionHighlights()
+      root.render(
+        <FloatingPanel
+          debug
+          panelProps={{
+            brandLabel: sourceLabel,
+            statusMessage: `LFS found a ${sourceLabel} collection page, but your current profile still needs more coverage before item cards can be ranked. Save at least one meaningful body or preference signal in the profile page, then reload this collection.`,
+            savedProfiles,
+            activeProfileId,
+            onSelectProfile: (profileId) => {
+              void handleSelectProfile(profileId)
+            },
+            onOpenSettings: openSettingsPage,
+            onIgnoreSimilar: () => undefined
+          }}
+        />
+      )
+      return
+    }
+
     const highlightedRecommendations = recommendations.filter(
-      ({ recommendation }) => recommendation.level !== "avoid" || recommendation.confidence >= 0.45
+      ({ recommendation }) =>
+        recommendation.level !== "needs_data" &&
+        (recommendation.level !== "avoid" || recommendation.confidence >= 0.45)
     )
 
     highlightCollectionItems(highlightedRecommendations.slice(0, 12))
     root.render(
       <FloatingPanel
         panelProps={{
+          brandLabel: sourceLabel,
           collectionItems: recommendations.map(({ item, recommendation }) => ({
             title: item.title,
             level: recommendation.level,
@@ -368,7 +501,8 @@ async function renderPanel(): Promise<void> {
       <FloatingPanel
         debug
         panelProps={{
-          statusMessage: "LFS loaded: current page does not look like a lululemon product page.",
+          brandLabel: sourceLabel,
+          statusMessage: `LFS loaded: current page does not look like a ${sourceLabel} product page.`,
           savedProfiles,
           activeProfileId,
           onSelectProfile: (profileId) => {
@@ -386,6 +520,7 @@ async function renderPanel(): Promise<void> {
     root.render(
       <FloatingPanel
         panelProps={{
+          brandLabel: sourceLabel,
           unsupportedReason: parsed.unsupportedReason ?? "This product is not supported in Version A.",
           savedProfiles,
           activeProfileId,
@@ -401,13 +536,14 @@ async function renderPanel(): Promise<void> {
   }
 
   const [profile, ignoreRules] = await Promise.all([getUserProfile(), getIgnoreRules()])
-  const product = normalizeLululemonProduct(parsed.rawProduct)
+  const product = normalizeProduct(parsed.rawProduct)
   const recommendation = recommendProduct(product, profile, ignoreRules)
 
   root.render(
     <FloatingPanel
       canCollapse
       panelProps={{
+        brandLabel: sourceLabel,
         product,
         recommendation,
         savedProfiles,
@@ -469,7 +605,7 @@ function scheduleNavigationRenders() {
   pendingNavigationTimers.forEach((timer) => window.clearTimeout(timer))
   pendingNavigationTimers = []
 
-  ;[0, 150, 600].forEach((delay) => {
+  ;[0, 150, 600, 1500, 3000].forEach((delay) => {
     const timer = window.setTimeout(() => {
       pendingNavigationTimers = pendingNavigationTimers.filter((candidate) => candidate !== timer)
       renderPanelSafely()
@@ -508,15 +644,25 @@ function installNavigationObserver() {
     handleUrlChange()
   }, 1000)
 
-  const observer = new MutationObserver(() => {
+  const observer = new MutationObserver((mutations) => {
     handleUrlChange()
+
+    if (window.location.href === lastUrl && mutationNeedsRender(mutations)) {
+      scheduleRender(180)
+    }
   })
 
-  observer.observe(document.documentElement, { childList: true, subtree: true })
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    characterData: true,
+    attributeFilter: ["href", "src", "alt", "data-pid", "data-product-tile", "data-search-component", "class"]
+  })
 }
 
 console.info("[LFS] content script boot", { url: window.location.href })
 
-scheduleRender()
+scheduleNavigationRenders()
 
 installNavigationObserver()

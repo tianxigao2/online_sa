@@ -43,7 +43,23 @@ const NECKLINE_OPTIONS = ["square", "scoop", "v-neck", "crew neck", "halter"]
 const LENGTH_OPTIONS = ["cropped", "mini", "knee", "midi", "maxi", "full"]
 const RISE_OPTIONS = ["high", "mid", "low"]
 const SUPPORT_OPTIONS = ["light", "medium", "high"]
-const USE_CASE_OPTIONS = ["workout", "running", "yoga", "travel", "casual", "work", "lounge", "layering"]
+const USE_CASE_OPTIONS = [
+  "workout",
+  "running",
+  "yoga",
+  "tennis",
+  "hike",
+  "travel",
+  "vacation",
+  "casual",
+  "work",
+  "lounge",
+  "date night",
+  "party",
+  "occasion",
+  "wedding guest",
+  "layering"
+]
 const STYLE_GOAL_OPTIONS = [
   "look taller",
   "emphasize waist",

@@ -1,3 +1,5 @@
+import type { CanonicalGarment } from "../mapping/types"
+
 export type ApparelCategory =
   | "tops"
   | "tees"
@@ -19,6 +21,8 @@ export type ApparelCategory =
   | "underwear"
   | "base_layers"
   | "unknown"
+
+export type ProductSource = "lululemon" | "reformation" | "skims"
 
 export type RiskPreference = "safe" | "balanced" | "adventurous"
 export type SupportState = "unsupported" | "light" | "medium" | "high"
@@ -123,7 +127,7 @@ export interface DerivedBodyProfile {
 }
 
 export interface StructuredProduct {
-  source: "lululemon"
+  source: ProductSource
   productId: string
   url: string
   title: string
@@ -163,6 +167,7 @@ export interface StructuredProduct {
     lining?: string
     intendedUse?: string[]
   }
+  canonical?: CanonicalGarment
 }
 
 export interface RecommendationResult {
@@ -228,7 +233,7 @@ export interface IgnoreRule {
 }
 
 export interface ParsedRawProduct {
-  source: "lululemon"
+  source: ProductSource
   productId: string
   url: string
   title: string
@@ -256,7 +261,7 @@ export interface ParsedProductPageResult {
 }
 
 export interface ParsedCollectionItem {
-  source: "lululemon"
+  source: ProductSource
   productId: string
   url: string
   title: string

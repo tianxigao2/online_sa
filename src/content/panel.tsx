@@ -2,6 +2,7 @@ import React from "react"
 import type { RecommendationResult, SavedUserProfile, StructuredProduct } from "../shared/types"
 
 interface PanelProps {
+  brandLabel?: string
   product?: StructuredProduct
   recommendation?: RecommendationResult
   unsupportedReason?: string
@@ -102,6 +103,10 @@ function uniqueItems(values: string[], limit: number): string[] {
   return Array.from(new Set(values.filter(Boolean))).slice(0, limit)
 }
 
+function materialSectionLabel(materials: string[]): string {
+  return materials.length === 1 ? "Material" : "Materials"
+}
+
 function explainPositiveSignal(signal: string, product: StructuredProduct): string {
   switch (signal) {
     case "square_neck":
@@ -185,6 +190,7 @@ function isLowConfidence(level: RecommendationResult["level"], confidence: numbe
 }
 
 export function ProductPanel({
+  brandLabel,
   product,
   recommendation,
   unsupportedReason,
@@ -202,6 +208,7 @@ export function ProductPanel({
   onIgnoreSimilar,
   onUndoIgnore
 }: PanelProps) {
+  const kickerLabel = brandLabel ? `${brandLabel} Fit Signal` : "Fit Signal"
   const sizeRecommendation = recommendation?.sizeRecommendation
   const panelControls = (
     <div className="lfs-panel-controls">
@@ -277,7 +284,7 @@ export function ProductPanel({
       <div className="lfs-card lfs-chip-card">
         <div className="lfs-header">
           <div className="lfs-header-top">
-            <div className="lfs-kicker">Lululemon Fit Signal</div>
+            <div className="lfs-kicker">{kickerLabel}</div>
             {panelControls}
           </div>
           <div className="lfs-title">Collection Ranking</div>
@@ -371,12 +378,13 @@ export function ProductPanel({
     recommendation.level === "needs_data"
       ? "I'm not very confident with the judgment for this product yet."
       : "I'm not very confident with the judgment for this product."
+  const visibleMaterials = uniqueItems(product.materials ?? [], 4)
 
   return (
     <div className="lfs-card">
       <div className="lfs-header">
         <div className="lfs-header-top">
-          <div className="lfs-kicker">Lululemon Fit Signal</div>
+          <div className="lfs-kicker">{kickerLabel}</div>
           {panelControls}
         </div>
         <div className="lfs-title">{product.title}</div>
@@ -441,6 +449,19 @@ export function ProductPanel({
               {recommendation.occasions.map((occasion) => (
                 <span className="lfs-pill" key={occasion}>
                   {occasion}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {visibleMaterials.length > 0 ? (
+          <div className="lfs-section">
+            <div className="lfs-label">{materialSectionLabel(visibleMaterials)}</div>
+            <div className="lfs-pill-row">
+              {visibleMaterials.map((material) => (
+                <span className="lfs-pill" key={material}>
+                  {material}
                 </span>
               ))}
             </div>

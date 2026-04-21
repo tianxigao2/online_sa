@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="760" viewBox="0 0 360 760" role="img" aria-label="Generated front silhouette for tall upper-body emphasis fixture">
+  <rect width="360" height="760" fill="#f3f6f2"/>
+  <circle cx="180" cy="78" r="30" fill="#33413f"/>
+  <path d="M126 128 C150 112 210 112 234 128 C225 207 213 287 205 364 C222 420 232 523 225 657 C209 671 193 671 181 657 C178 545 176 460 180 394 C184 460 182 545 179 657 C167 671 151 671 135 657 C128 523 138 420 155 364 C147 287 135 207 126 128 Z" fill="#33413f"/>
+  <path d="M123 149 C83 201 77 267 100 336" fill="none" stroke="#33413f" stroke-width="24" stroke-linecap="round"/>
+  <path d="M237 149 C277 201 283 267 260 336" fill="none" stroke="#33413f" stroke-width="24" stroke-linecap="round"/>
+  <text x="180" y="716" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#64716c">tall upper front fixture</text>
+</svg>

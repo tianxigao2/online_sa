@@ -158,4 +158,36 @@ describe("recommendProduct", () => {
     expect(advice.attributeGroups.waistline.recommended).toContain("defined_waist")
     expect(advice.reasons.length).toBeGreaterThan(0)
   })
+
+  it("does not over-size reformation fitted dresses by treating them like compressive activewear", () => {
+    const reformationDress: StructuredProduct = {
+      source: "reformation",
+      productId: "ref-1",
+      url: "https://www.thereformation.com/products/roma-linen-dress/1320130HRY.html",
+      title: "Roma Linen Dress",
+      category: "dresses",
+      price: 278,
+      currency: "USD",
+      availableSizes: ["0", "2", "4", "6", "8", "10"],
+      description: "A fitted midi dress with a square neckline and slim bodice.",
+      productFeatures: ["Slim fit", "Square neckline", "Midi length"],
+      materials: ["100% Linen"],
+      attributes: {
+        fit: "slim",
+        neckline: "square",
+        length: "midi",
+        stretch: "medium",
+        constructionSupport: "medium"
+      }
+    }
+
+    const result = recommendProduct(reformationDress, {
+      height: 168,
+      weight: 61,
+      riskPreference: "balanced"
+    })
+
+    expect(result.sizeRecommendation?.recommendedSize).toBe("6")
+    expect(result.sizeRecommendation?.risks.join(" ")).not.toMatch(/nominal size/i)
+  })
 })

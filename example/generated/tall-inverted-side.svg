@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="760" viewBox="0 0 360 760" role="img" aria-label="Generated side silhouette for tall upper-body emphasis fixture">
+  <rect width="360" height="760" fill="#f3f6f2"/>
+  <circle cx="180" cy="78" r="30" fill="#33413f"/>
+  <path d="M142 132 C165 113 210 120 225 145 C237 216 225 292 204 368 C218 430 221 533 214 657 C200 670 184 670 174 656 C173 547 171 470 175 400 C164 468 156 548 150 656 C139 670 123 670 111 657 C113 528 128 430 154 366 C143 288 134 203 142 132 Z" fill="#33413f"/>
+  <path d="M141 160 C116 215 114 280 132 337" fill="none" stroke="#33413f" stroke-width="22" stroke-linecap="round"/>
+  <text x="180" y="716" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#64716c">tall upper side fixture</text>
+</svg>

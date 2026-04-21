@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="720" viewBox="0 0 360 720" role="img" aria-label="Generated front silhouette for petite lower-body emphasis fixture">
+  <rect width="360" height="720" fill="#f7f4ef"/>
+  <circle cx="180" cy="86" r="31" fill="#2f3a45"/>
+  <path d="M147 130 C160 118 200 118 213 130 L224 248 C216 284 207 322 206 368 C233 398 253 494 249 612 C235 624 216 624 204 611 C197 510 190 446 180 392 C170 446 163 510 156 611 C144 624 125 624 111 612 C107 494 127 398 154 368 C153 322 144 284 136 248 Z" fill="#2f3a45"/>
+  <path d="M136 170 C111 214 105 276 119 333" fill="none" stroke="#2f3a45" stroke-width="22" stroke-linecap="round"/>
+  <path d="M224 170 C249 214 255 276 241 333" fill="none" stroke="#2f3a45" stroke-width="22" stroke-linecap="round"/>
+  <text x="180" y="682" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#6f655d">petite pear front fixture</text>
+</svg>

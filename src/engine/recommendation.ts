@@ -48,7 +48,7 @@ type AttributeId =
 
 type AttributeState = Record<AttributeId, { score: number; reasons: string[] }>
 
-const NUMERIC_SIZES = ["0", "2", "4", "6", "8", "10", "12", "14", "16", "18", "20"]
+const NUMERIC_SIZES = ["000", "00", "0", "2", "4", "6", "8", "10", "12", "14", "16", "18", "20"]
 const ALPHA_SIZES = ["XXS", "XS", "S", "M", "L", "XL", "XXL"]
 
 const ATTRIBUTE_FAMILIES: Record<AttributeFamily, AttributeId[]> = {
@@ -167,9 +167,23 @@ function shiftSize(size: string, availableSizes: string[], direction: -1 | 1): s
   return shifted && availableSizes.includes(shifted) ? shifted : undefined
 }
 
-function estimateNumericSize(profile: UserInputProfile): string | undefined {
+function estimateNumericSize(product: StructuredProduct, profile: UserInputProfile): string | undefined {
   const waist = profile.manualMeasurements?.waist
+  const hips = profile.manualMeasurements?.hips
+  const bust = profile.manualMeasurements?.bust
+
   if (waist !== undefined) {
+    if (product.source === "reformation") {
+      if (waist <= 61) return "0"
+      if (waist <= 65) return "2"
+      if (waist <= 69) return "4"
+      if (waist <= 73) return "6"
+      if (waist <= 77) return "8"
+      if (waist <= 82) return "10"
+      if (waist <= 87) return "12"
+      return "14"
+    }
+
     if (waist <= 61) return "2"
     if (waist <= 66) return "4"
     if (waist <= 71) return "6"
@@ -180,7 +194,53 @@ function estimateNumericSize(profile: UserInputProfile): string | undefined {
     return "16"
   }
 
+  if (hips !== undefined || bust !== undefined) {
+    const dominantMeasurement = Math.max(hips ?? 0, bust ?? 0)
+    if (product.source === "reformation") {
+      if (dominantMeasurement <= 84) return "0"
+      if (dominantMeasurement <= 88) return "2"
+      if (dominantMeasurement <= 92) return "4"
+      if (dominantMeasurement <= 97) return "6"
+      if (dominantMeasurement <= 102) return "8"
+      if (dominantMeasurement <= 107) return "10"
+      if (dominantMeasurement <= 113) return "12"
+      return "14"
+    }
+  }
+
+  if (profile.weight !== undefined && profile.height !== undefined) {
+    const bmi = profile.weight / ((profile.height / 100) * (profile.height / 100))
+
+    if (product.source === "reformation") {
+      if (bmi < 18.5) return "2"
+      if (bmi < 20.7) return "4"
+      if (bmi < 23.2) return "6"
+      if (bmi < 25.8) return "8"
+      if (bmi < 28.6) return "10"
+      if (bmi < 31.2) return "12"
+      return "14"
+    }
+
+    if (bmi < 18.5) return "2"
+    if (bmi < 20.5) return "4"
+    if (bmi < 22.8) return "6"
+    if (bmi < 25.3) return "8"
+    if (bmi < 28.1) return "10"
+    if (bmi < 31.1) return "12"
+    return "14"
+  }
+
   if (profile.weight !== undefined) {
+    if (product.source === "reformation") {
+      if (profile.weight < 48) return "2"
+      if (profile.weight < 53) return "4"
+      if (profile.weight < 59) return "6"
+      if (profile.weight < 66) return "8"
+      if (profile.weight < 73) return "10"
+      if (profile.weight < 82) return "12"
+      return "14"
+    }
+
     if (profile.weight < 48) return "2"
     if (profile.weight < 54) return "4"
     if (profile.weight < 61) return "6"
@@ -233,7 +293,7 @@ function recommendSize(product: StructuredProduct, profile: UserInputProfile): R
     }
   }
 
-  const numericGuess = estimateNumericSize(profile)
+  const numericGuess = estimateNumericSize(product, profile)
   const usesNumericSizes = product.availableSizes.every((size) => NUMERIC_SIZES.includes(size))
   const baseGuess = usesNumericSizes
     ? numericGuess
@@ -257,13 +317,30 @@ function recommendSize(product: StructuredProduct, profile: UserInputProfile): R
     risks.push("Save height, weight, or measurements in the profile page before treating size guidance as actionable.")
   }
 
-  if (recommendedSize && (product.attributes.compression === "high" || product.attributes.supportLevel === "high" || product.attributes.fit === "slim")) {
+  const shouldSizeUpForCloseFit =
+    product.source === "lululemon"
+      ? product.attributes.compression === "high" || product.attributes.supportLevel === "high" || product.attributes.fit === "slim"
+      : product.attributes.compression === "high" ||
+        (product.attributes.fit === "slim" &&
+          (product.attributes.fabricStructure === "structured" ||
+            product.attributes.constructionSupport === "high") &&
+          product.attributes.stretch !== "high")
+
+  if (recommendedSize && shouldSizeUpForCloseFit) {
     const sizeUp = recommendedSize ? shiftSize(recommendedSize, product.availableSizes, 1) : undefined
     if (sizeUp) {
       recommendedSize = sizeUp
-      reasons.push("This item reads as compressive or close-fitting, so the heuristic nudges one step up.")
+      reasons.push(
+        product.source === "lululemon"
+          ? "This item reads as compressive or close-fitting, so the heuristic nudges one step up."
+          : "This item reads as quite structured through a slim fit, so the heuristic nudges one step up."
+      )
     }
-    risks.push("High-compression or slim items can feel smaller than the nominal size.")
+    risks.push(
+      product.source === "lululemon"
+        ? "High-compression or slim items can feel smaller than the nominal size."
+        : "Structured slim items can feel smaller than the nominal size, but slim styling alone should not automatically push sizing up."
+    )
   }
 
   if (product.attributes.fit === "oversized" || product.attributes.fit === "relaxed") {
@@ -345,7 +422,7 @@ function applyBodyStateRules(
       )
       adjustScores(
         state,
-        ["defined_waist"],
+        ["defined_waist", "bodycon", "high_visual_detail"],
         -0.45,
         "Strongly forced waist emphasis can read less natural when the waist break is softer."
       )
@@ -353,7 +430,7 @@ function applyBodyStateRules(
   }
 
   if (hasFamily("neckline") || hasFamily("strapSleeve")) {
-    if (bodyState.horizontalSensitivity >= 0.62) {
+    if (bodyState.horizontalSensitivity >= 0.58) {
       adjustScores(
         state,
         ["v_neck", "scoop_neck", "square_neck", "wide_strap", "tank_shoulder"],
@@ -489,7 +566,7 @@ function applyBodyStateRules(
       )
     }
 
-    if (bodyState.horizontalSensitivity >= 0.62) {
+    if (bodyState.horizontalSensitivity >= 0.58) {
       adjustScores(
         state,
         ["low_visual_detail"],
@@ -860,7 +937,9 @@ function computeFitRisks(
   addRisk(
     "armhole_digging_risk",
     clamp(bodyState.horizontalSensitivity * 0.48 + Number(productSignals.has("thin_strap") || productSignals.has("sleeveless")) * 0.2 + Number(product.attributes.fit === "slim") * 0.26),
-    "More exposed armholes with a close fit are more likely to cut in when upper-body width sensitivity is higher."
+    productSignals.has("thin_strap") || productSignals.has("sleeveless")
+      ? "More exposed armholes with a close fit are more likely to cut in when upper-body width sensitivity is higher."
+      : "A close upper-body fit is more likely to feel exacting around the armhole and upper-arm area when upper-body width sensitivity is higher."
   )
 
   addRisk(
@@ -1037,7 +1116,7 @@ function hasMeaningfulProfileSignals(profile: UserInputProfile): boolean {
     profile.imageAnalysis?.confidence
   ].filter(Boolean).length
 
-  return bodySignals >= 2 || preferenceCount >= 2
+  return bodySignals >= 1 || preferenceCount >= 1
 }
 
 export function recommendProduct(

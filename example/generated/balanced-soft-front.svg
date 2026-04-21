@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="730" viewBox="0 0 360 730" role="img" aria-label="Generated front silhouette for balanced soft-waist fixture">
+  <rect width="360" height="730" fill="#f6f2f7"/>
+  <circle cx="180" cy="84" r="30" fill="#403847"/>
+  <path d="M143 132 C160 120 200 120 217 132 C225 215 220 295 210 370 C224 430 228 520 220 620 C207 632 190 632 181 620 C179 526 178 453 180 394 C182 453 181 526 179 620 C170 632 153 632 140 620 C132 520 136 430 150 370 C140 295 135 215 143 132 Z" fill="#403847"/>
+  <path d="M142 168 C116 219 112 281 128 342" fill="none" stroke="#403847" stroke-width="21" stroke-linecap="round"/>
+  <path d="M218 168 C244 219 248 281 232 342" fill="none" stroke="#403847" stroke-width="21" stroke-linecap="round"/>
+  <text x="180" y="692" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#756b7a">balanced soft front fixture</text>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="730" viewBox="0 0 360 730" role="img" aria-label="Generated side silhouette for balanced soft-waist fixture">
+  <rect width="360" height="730" fill="#f6f2f7"/>
+  <circle cx="180" cy="84" r="30" fill="#403847"/>
+  <path d="M147 134 C166 119 203 123 216 142 C226 215 220 295 204 370 C218 430 222 520 214 620 C201 632 185 632 176 620 C175 526 174 456 177 396 C165 456 158 526 153 620 C143 632 126 632 114 620 C113 517 130 430 154 370 C144 296 138 208 147 134 Z" fill="#403847"/>
+  <path d="M148 171 C126 224 123 281 138 342" fill="none" stroke="#403847" stroke-width="20" stroke-linecap="round"/>
+  <text x="180" y="692" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#756b7a">balanced soft side fixture</text>
+</svg>
